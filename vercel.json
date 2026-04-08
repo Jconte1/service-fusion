@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "path": "/api/service-fusion/jobs/daily-invoiced/nightly",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}
+

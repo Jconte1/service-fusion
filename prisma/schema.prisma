@@ -1,0 +1,835 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AccountUserRole {
+  id        String      @id
+  createdAt DateTime    @default(now())
+  updatedAt DateTime
+  baid      String      @db.VarChar(64)
+  userId    String
+  role      AccountRole
+  isActive  Boolean     @default(true)
+  users     users       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([baid, role, isActive])
+  @@index([baid, userId, role, isActive])
+}
+
+model AppointmentAccessToken {
+  id                String            @id
+  appointmentId     String
+  token             String            @unique
+  issuedAt          DateTime          @default(now())
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  PickupAppointment PickupAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([expiresAt])
+}
+
+model AppointmentNotificationJob {
+  id                String                      @id
+  appointmentId     String
+  type              AppointmentNotificationType
+  channel           NotificationChannel         @default(Both)
+  scheduledAt       DateTime
+  status            NotificationJobStatus       @default(Pending)
+  attemptCount      Int                         @default(0)
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  idempotencyKey    String                      @unique
+  payloadSnapshot   Json?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime
+  PickupAppointment PickupAppointment           @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([scheduledAt, status])
+}
+
+model BaidSyncState {
+  baid             String    @id @db.VarChar(64)
+  lastSyncAt       DateTime?
+  lastAttemptAt    DateTime?
+  lastSuccessAt    DateTime?
+  lastErrorAt      DateTime?
+  lastErrorMessage String?
+  inProgress       Boolean   @default(false)
+  inProgressSince  DateTime?
+}
+
+model CustomerCredential {
+  id           String   @id
+  userId       String   @unique
+  passwordHash String
+  phone        String   @db.VarChar(32)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Device {
+  id         String   @id
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  userId     String
+  platform   String   @db.VarChar(16)
+  pushToken  String   @unique
+  lastSeenAt DateTime @default(now())
+  isActive   Boolean  @default(true)
+  users      users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ErpOrderAddress {
+  id              String          @id
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  orderSummaryId  String          @unique @db.VarChar(64)
+  baid            String          @db.VarChar(64)
+  orderNbr        String          @db.VarChar(64)
+  addressLine1    String?         @db.VarChar(256)
+  addressLine2    String?         @db.VarChar(256)
+  city            String?         @db.VarChar(128)
+  state           String?         @db.VarChar(64)
+  postalCode      String?         @db.VarChar(32)
+  ErpOrderSummary ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+
+  @@index([baid, orderNbr])
+  @@index([orderSummaryId])
+}
+
+model ErpOrderContact {
+  id              String          @id
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  orderSummaryId  String          @unique @db.VarChar(64)
+  baid            String          @db.VarChar(64)
+  orderNbr        String          @db.VarChar(64)
+  deliveryEmail   String?         @db.VarChar(256)
+  siteNumber      String?         @db.VarChar(128)
+  osContact       String?         @db.VarChar(256)
+  confirmedVia    String?         @default("") @db.VarChar(256)
+  confirmedWith   String?         @default("") @db.VarChar(256)
+  sixWeekFailed   Boolean?        @default(false)
+  tenDaySent      Boolean?        @default(false)
+  threeDaySent    Boolean?        @default(false)
+  ErpOrderSummary ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+
+  @@index([baid, orderNbr])
+  @@index([orderSummaryId])
+}
+
+model ErpOrderLine {
+  id              String          @id
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  orderSummaryId  String          @db.VarChar(64)
+  baid            String          @db.VarChar(64)
+  orderNbr        String          @db.VarChar(64)
+  lineDescription String?         @db.VarChar(512)
+  inventoryId     String?         @db.VarChar(128)
+  lineType        String?         @db.VarChar(64)
+  openQty         Decimal?        @db.Decimal(18, 4)
+  unitPrice       Decimal?        @db.Decimal(18, 2)
+  usrETA          DateTime?
+  here            String?         @db.VarChar(512)
+  warehouse       String?         @db.VarChar(512)
+  amount          Decimal?        @db.Decimal(18, 2)
+  orderQty        Decimal?        @db.Decimal(18, 4)
+  taxRate         Decimal?        @db.Decimal(18, 2)
+  allocatedQty    Int             @default(0)
+  isAllocated     Boolean         @default(false)
+  ErpOrderSummary ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+
+  @@index([baid, orderNbr])
+  @@index([orderSummaryId])
+}
+
+model ErpOrderPayment {
+  id              String          @id
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  orderSummaryId  String          @unique @db.VarChar(64)
+  baid            String          @db.VarChar(64)
+  orderNbr        String          @db.VarChar(64)
+  orderTotal      Decimal?        @db.Decimal(18, 2)
+  unpaidBalance   Decimal?        @db.Decimal(18, 2)
+  terms           String          @db.VarChar(64)
+  status          String          @default("Active") @db.VarChar(48)
+  ErpOrderSummary ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+
+  @@index([baid, orderNbr])
+  @@index([orderSummaryId])
+}
+
+model ErpOrderSummary {
+  id                      String            @id
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime
+  baid                    String            @db.VarChar(64)
+  orderNbr                String            @db.VarChar(64)
+  locationId              String?           @db.VarChar(64)
+  status                  String            @db.VarChar(48)
+  deliveryDate            DateTime?
+  lastSeenAt              DateTime          @default(now())
+  isActive                Boolean           @default(true)
+  jobName                 String?           @db.VarChar(128)
+  shipVia                 String?           @db.VarChar(64)
+  customerName            String            @default("") @db.VarChar(64)
+  buyerGroup              String?           @default("") @db.VarChar(64)
+  noteId                  String?           @default("") @db.VarChar(64)
+  lastAcumaticaModifiedAt DateTime?
+  lastAcumaticaPullAt     DateTime?
+  salesPersonNumber       String?           @db.VarChar(16)
+  ErpOrderAddress         ErpOrderAddress?
+  ErpOrderContact         ErpOrderContact?
+  ErpOrderLine            ErpOrderLine[]
+  ErpOrderPayment         ErpOrderPayment?
+  NotificationJob         NotificationJob[]
+  OrderAssignment         OrderAssignment[]
+
+  @@unique([baid, orderNbr])
+  @@index([baid, deliveryDate])
+  @@index([baid, isActive, status])
+}
+
+model ErpSyncRun {
+  id         String    @id
+  baid       String    @db.VarChar(64)
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean?
+  note       String?
+
+  @@index([baid, startedAt])
+}
+
+model InviteCode {
+  id                                      String           @id
+  createdAt                               DateTime         @default(now())
+  updatedAt                               DateTime
+  baid                                    String           @db.VarChar(64)
+  role                                    AccountRole
+  recipientEmail                          String?          @db.VarChar(256)
+  recipientPhone                          String?          @db.VarChar(64)
+  codeHash                                String           @db.VarChar(256)
+  status                                  InviteCodeStatus @default(Pending)
+  expiresAt                               DateTime
+  sentAt                                  DateTime?
+  usedAt                                  DateTime?
+  usedByUserId                            String?
+  createdByUserId                         String?
+  codePlain                               String?          @db.VarChar(16)
+  users_InviteCode_createdByUserIdTousers users?           @relation("InviteCode_createdByUserIdTousers", fields: [createdByUserId], references: [id])
+  users_InviteCode_usedByUserIdTousers    users?           @relation("InviteCode_usedByUserIdTousers", fields: [usedByUserId], references: [id])
+
+  @@index([baid, status])
+  @@index([expiresAt])
+}
+
+model InviteLockout {
+  key           String    @id @db.VarChar(128)
+  attemptCount  Int       @default(0)
+  lockedUntil   DateTime?
+  lastAttemptAt DateTime?
+}
+
+model InviteRequestLog {
+  id        String   @id
+  createdAt DateTime @default(now())
+  baid      String?  @db.VarChar(64)
+  ip        String?  @db.VarChar(64)
+  userAgent String?
+  result    String   @db.VarChar(32)
+  reason    String?  @db.VarChar(128)
+
+  @@index([baid, createdAt])
+}
+
+model NotificationJob {
+  id                       String          @id
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime
+  orderSummaryId           String
+  phase                    String          @db.VarChar(8)
+  scheduledAt              DateTime
+  status                   String          @db.VarChar(16)
+  attemptCount             Int             @default(0)
+  escalationPostedAt       DateTime?
+  idempotencyKey           String          @unique
+  orderNbr                 String?         @db.VarChar(64)
+  closedAt                 DateTime?
+  lastAttemptAt            DateTime?
+  lastDeliveryDateSnapshot DateTime?
+  ErpOrderSummary          ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+
+  @@unique([orderSummaryId, phase])
+  @@index([phase, orderNbr])
+  @@index([scheduledAt, status])
+}
+
+model OrderAssignment {
+  id              String          @id
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  orderSummaryId  String          @db.VarChar(64)
+  userId          String
+  role            String          @db.VarChar(16)
+  source          String          @db.VarChar(32)
+  isActive        Boolean         @default(true)
+  ErpOrderSummary ErpOrderSummary @relation(fields: [orderSummaryId], references: [id], onDelete: Cascade)
+  users           users           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orderSummaryId, role, isActive])
+  @@index([userId, isActive])
+}
+
+model OrderReadyAccessToken {
+  id               String           @id
+  orderReadyId     String
+  token            String           @unique
+  issuedAt         DateTime         @default(now())
+  revokedAt        DateTime?
+  OrderReadyNotice OrderReadyNotice @relation(fields: [orderReadyId], references: [id], onDelete: Cascade)
+
+  @@index([orderReadyId])
+}
+
+model OrderReadyJobState {
+  id        String    @id
+  name      String    @unique @db.VarChar(64)
+  lastRunAt DateTime?
+}
+
+model OrderReadyLine {
+  id               String           @id
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime
+  orderReadyId     String
+  orderNbr         String           @db.VarChar(64)
+  inventoryId      String           @db.VarChar(128)
+  OrderReadyNotice OrderReadyNotice @relation(fields: [orderReadyId], references: [id], onDelete: Cascade)
+
+  @@unique([orderReadyId, inventoryId])
+  @@index([orderNbr])
+  @@index([orderReadyId])
+}
+
+model OrderReadyNotice {
+  id                     String                  @id
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime
+  orderNbr               String                  @unique @db.VarChar(64)
+  baid                   String?                 @db.VarChar(64)
+  status                 String?                 @db.VarChar(128)
+  orderType              String?                 @db.VarChar(128)
+  shipVia                String?                 @db.VarChar(128)
+  qtyUnallocated         Decimal?                @db.Decimal(18, 4)
+  qtyAllocated           Decimal?                @db.Decimal(18, 4)
+  customerId             String?                 @db.VarChar(128)
+  customerLocationId     String?                 @db.VarChar(128)
+  attributeBuyerGroup    String?                 @db.VarChar(256)
+  attributeOsContact     String?                 @db.VarChar(256)
+  attributeSiteNumber    String?                 @db.VarChar(256)
+  attributeDelEmail      String?                 @db.VarChar(256)
+  contactName            String?                 @db.VarChar(256)
+  contactPhone           String?                 @db.VarChar(64)
+  contactEmail           String?                 @db.VarChar(256)
+  locationId             String?                 @db.VarChar(64)
+  smsOptIn               Boolean                 @default(false)
+  lastNotifiedAt         DateTime?
+  nextEligibleNotifyAt   DateTime?
+  lastReadyAt            DateTime?
+  scheduledAppointmentId String?
+  smsOptOutAt            DateTime?
+  smsOptOutReason        String?                 @db.VarChar(64)
+  smsFirstSentAt         DateTime?
+  attributeEmailNoty     String?                 @db.VarChar(256)
+  attributeSmsTxt        String?                 @db.VarChar(256)
+  OrderReadyAccessToken  OrderReadyAccessToken[]
+  OrderReadyLine         OrderReadyLine[]
+  PickupAppointment      PickupAppointment?      @relation(fields: [scheduledAppointmentId], references: [id])
+
+  @@index([locationId])
+  @@index([nextEligibleNotifyAt])
+  @@index([status])
+}
+
+model PasswordResetToken {
+  id          String    @id
+  staffUserId String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+  StaffUser   StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([staffUserId])
+}
+
+model Pickup {
+  id                String       @id
+  pickupReference   String
+  locationId        String
+  startAt           DateTime
+  endAt             DateTime
+  status            PickupStatus @default(Scheduled)
+  customerFirstName String
+  customerLastName  String?
+  customerEmail     String
+  customerPhone     String?
+  vehicleInfo       String?
+  customerNotes     String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime
+
+  @@index([locationId])
+  @@index([pickupReference])
+  @@index([status])
+}
+
+model PickupAppointment {
+  id                         String                       @id
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime
+  userId                     String?
+  email                      String                       @db.VarChar(256)
+  pickupReference            String?                      @db.VarChar(256)
+  locationId                 String                       @db.VarChar(64)
+  startAt                    DateTime
+  endAt                      DateTime
+  status                     PickupAppointmentStatus      @default(Scheduled)
+  customerFirstName          String                       @db.VarChar(128)
+  customerLastName           String?                      @db.VarChar(128)
+  customerEmail              String                       @db.VarChar(256)
+  customerPhone              String?                      @db.VarChar(32)
+  vehicleInfo                String?
+  customerNotes              String?
+  emailOptIn                 Boolean                      @default(false)
+  emailOptInAt               DateTime?
+  emailOptInEmail            String?                      @db.VarChar(256)
+  emailOptInSource           String?                      @db.VarChar(128)
+  smsOptIn                   Boolean                      @default(false)
+  smsOptInAt                 DateTime?
+  smsOptInPhone              String?                      @db.VarChar(32)
+  smsOptInSource             String?                      @db.VarChar(128)
+  smsOptOutAt                DateTime?
+  smsOptOutReason            String?                      @db.VarChar(64)
+  smsFirstSentAt             DateTime?
+  AppointmentAccessToken     AppointmentAccessToken[]
+  AppointmentNotificationJob AppointmentNotificationJob[]
+  OrderReadyNotice           OrderReadyNotice[]
+  users                      users?                       @relation(fields: [userId], references: [id])
+  PickupAppointmentLine      PickupAppointmentLine[]
+  PickupAppointmentOrder     PickupAppointmentOrder[]
+  PickupAppointmentShipment  PickupAppointmentShipment[]
+
+  @@index([email])
+  @@index([locationId, startAt])
+  @@index([status])
+  @@index([userId])
+}
+
+model PickupAppointmentLine {
+  id                String            @id
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime
+  appointmentId     String
+  orderNbr          String            @db.VarChar(64)
+  lineId            String?           @db.VarChar(64)
+  inventoryId       String            @db.VarChar(128)
+  qtySelected       Decimal           @db.Decimal(18, 4)
+  lineDescription   String?           @db.VarChar(512)
+  PickupAppointment PickupAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId, inventoryId])
+  @@index([appointmentId, orderNbr])
+}
+
+model PickupAppointmentOrder {
+  id                String            @id
+  appointmentId     String
+  orderNbr          String            @db.VarChar(64)
+  baid              String?           @db.VarChar(64)
+  PickupAppointment PickupAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([appointmentId, orderNbr])
+  @@index([appointmentId])
+  @@index([orderNbr])
+}
+
+model PickupAppointmentShipment {
+  id                String            @id
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime
+  appointmentId     String
+  orderNbr          String            @db.VarChar(64)
+  shipmentNbr       String            @db.VarChar(64)
+  createdByUserId   String?           @db.VarChar(64)
+  PickupAppointment PickupAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId, orderNbr])
+  @@index([shipmentNbr])
+}
+
+model QuoteRequest {
+  id         String    @id
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime
+  firstName  String
+  lastName   String
+  company    String?
+  email      String
+  phone      String
+  address1   String
+  address2   String?
+  city       String
+  state      String
+  zip        String
+  notes      String?
+  cart       Json
+  status     String    @default("pending")
+  verifiedAt DateTime?
+}
+
+model RoleAuditLog {
+  id           String   @id
+  createdAt    DateTime @default(now())
+  baid         String   @db.VarChar(64)
+  actorUserId  String?
+  targetUserId String?
+  action       String   @db.VarChar(32)
+  fromRole     String?  @db.VarChar(32)
+  toRole       String?  @db.VarChar(32)
+  note         String?
+  ip           String?  @db.VarChar(64)
+
+  @@index([baid, createdAt])
+}
+
+model StaffUser {
+  id                 String               @id
+  email              String               @unique
+  name               String
+  passwordHash       String
+  role               StaffRole            @default(STAFF)
+  locationAccess     String[]
+  isActive           Boolean              @default(true)
+  mustChangePassword Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  salespersonEmail   String?              @db.VarChar(256)
+  salespersonName    String?              @db.VarChar(128)
+  salespersonNumber  String?              @unique @db.VarChar(16)
+  salespersonPhone   String?              @db.VarChar(32)
+  PasswordResetToken PasswordResetToken[]
+}
+
+model accounts {
+  id                    String    @id
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  userId                String
+  users                 users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model closeout_inventory {
+  id           String   @id
+  productId    String
+  modelNumber  String
+  acumaticaSku String   @unique
+  price        Decimal?
+  quantity     Int      @default(0)
+  lastSyncedAt DateTime @default(now())
+  newInBox     Boolean  @default(false)
+  bin          String   @default("default")
+  msrp         Decimal  @default(0.0)
+  warehouse    String   @default("SALT LAKE WAREHOUSE")
+  products     products @relation(fields: [productId], references: [id])
+
+  @@index([modelNumber])
+  @@index([productId])
+}
+
+model products {
+  id                 String               @id
+  model              String               @unique
+  major              String?
+  minor              String?
+  brand              String?
+  data               Json
+  created_at         DateTime             @default(now())
+  type               String?
+  features           String[]
+  width              String?
+  fuelType           String[]
+  configuration      String[]
+  productType        String[]
+  slug               String?              @unique
+  popularity         Int                  @default(0)
+  category           String?
+  closeout_inventory closeout_inventory[]
+}
+
+model sessions {
+  id             String   @id
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime
+  expiresAt      DateTime
+  token          String   @unique
+  ipAddress      String?
+  userAgent      String?
+  impersonatedBy String?
+  userId         String
+  users          users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model users {
+  id                                           String              @id
+  createdAt                                    DateTime            @default(now())
+  updatedAt                                    DateTime
+  name                                         String
+  email                                        String              @unique
+  emailVerified                                Boolean             @default(false)
+  image                                        String?
+  baid                                         String?             @db.VarChar(64)
+  isDeveloper                                  Boolean             @default(false)
+  AccountUserRole                              AccountUserRole[]
+  CustomerCredential                           CustomerCredential?
+  Device                                       Device[]
+  InviteCode_InviteCode_createdByUserIdTousers InviteCode[]        @relation("InviteCode_createdByUserIdTousers")
+  InviteCode_InviteCode_usedByUserIdTousers    InviteCode[]        @relation("InviteCode_usedByUserIdTousers")
+  OrderAssignment                              OrderAssignment[]
+  PickupAppointment                            PickupAppointment[]
+  accounts                                     accounts[]
+  sessions                                     sessions[]
+}
+
+model verifications {
+  id         String   @id
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  @@index([identifier])
+}
+
+enum SfSyncRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum SfJobSyncStatus {
+  PENDING
+  READY
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum SfLineType {
+  SERVICE
+  PRODUCT
+}
+
+enum SfTaxCategory {
+  TAXABLE
+  EXEMPT
+}
+
+model SfSyncRun {
+  id              String          @id @default(cuid())
+  runType         String          @db.VarChar(64)
+  denverDate      String          @db.VarChar(10)
+  startedAt       DateTime        @default(now())
+  finishedAt      DateTime?
+  status          SfSyncRunStatus @default(RUNNING)
+  fetchedCount    Int             @default(0)
+  processedCount  Int             @default(0)
+  sentSuccessCount Int            @default(0)
+  sentFailedCount Int             @default(0)
+  errorSummary    String?
+  jobs            SfJob[]
+
+  @@index([runType, denverDate])
+  @@index([status, startedAt])
+}
+
+model SfJob {
+  id                     String          @id @default(cuid())
+  runId                  String
+  serviceFusionJobId     BigInt
+  serviceFusionJobNumber String?         @db.VarChar(64)
+  serviceFusionUpdatedAt DateTime?
+  statusSf               String?         @db.VarChar(64)
+  customerIdSf           BigInt?
+  customerName           String?         @db.VarChar(256)
+  acumaticaCustomerId    String?         @db.VarChar(64)
+  locationNameRaw        String?         @db.VarChar(256)
+  locationNickname       String?         @db.VarChar(256)
+  locationIdForAcumatica String?         @db.VarChar(256)
+  street1                String?         @db.VarChar(256)
+  street2                String?         @db.VarChar(256)
+  city                   String?         @db.VarChar(128)
+  stateProv              String?         @db.VarChar(128)
+  postalCode             String?         @db.VarChar(32)
+  total                  Decimal?        @db.Decimal(18, 2)
+  taxesFeesTotal         Decimal?        @db.Decimal(18, 2)
+  dueTotal               Decimal?        @db.Decimal(18, 2)
+  taxableAmount          Decimal?        @db.Decimal(18, 2)
+  taxAmount              Decimal?        @db.Decimal(18, 2)
+  effectiveTaxRate       Decimal?        @db.Decimal(18, 4)
+  isTaxValid             Boolean         @default(true)
+  syncStatus             SfJobSyncStatus @default(PENDING)
+  failureReason          String?
+  acumaticaRef           String?         @db.VarChar(128)
+  payloadJson            Json?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  run                    SfSyncRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  lines                  SfJobLine[]
+  taxDetails             SfJobTaxDetail[]
+  events                 SfJobEvent[]
+
+  @@unique([serviceFusionJobId, serviceFusionUpdatedAt])
+  @@index([runId, syncStatus])
+  @@index([serviceFusionJobId])
+}
+
+model SfJobLine {
+  id            String     @id @default(cuid())
+  jobId         String
+  lineNo        Int
+  lineType      SfLineType
+  inventoryId   String?    @db.VarChar(128)
+  description   String?    @db.VarChar(512)
+  quantity      Decimal    @db.Decimal(18, 4)
+  unitPrice     Decimal    @db.Decimal(18, 2)
+  lineTotal     Decimal    @db.Decimal(18, 2)
+  taxNameRaw    String?    @db.VarChar(128)
+  taxCategory   SfTaxCategory @default(EXEMPT)
+  sourceName    String?    @db.VarChar(512)
+  lineIssuesJson Json?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  job           SfJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, lineNo])
+  @@index([jobId, lineType])
+}
+
+model SfJobTaxDetail {
+  id            String   @id @default(cuid())
+  jobId         String
+  taxNameRaw    String   @db.VarChar(128)
+  acumaticaTaxId String  @db.VarChar(64)
+  taxRate       Decimal  @db.Decimal(18, 4)
+  taxableAmount Decimal  @db.Decimal(18, 2)
+  taxAmount     Decimal  @db.Decimal(18, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  job           SfJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([acumaticaTaxId])
+}
+
+model SfJobEvent {
+  id          String   @id @default(cuid())
+  jobId       String
+  eventType   String   @db.VarChar(64)
+  message     String
+  detailsJson Json?
+  createdAt   DateTime @default(now())
+  job         SfJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+enum AccountRole {
+  ADMIN
+  PM
+}
+
+enum AppointmentNotificationType {
+  ScheduledConfirm
+  Reminder1Day
+  Reminder1Hour
+  Rescheduled
+  Cancelled
+  Completed
+  OrderListChanged
+  ReadyForPickup
+}
+
+enum InviteCodeStatus {
+  Pending
+  Used
+  Revoked
+  Expired
+}
+
+enum NotificationChannel {
+  Email
+  SMS
+  Both
+}
+
+enum NotificationJobStatus {
+  Pending
+  Sent
+  Skipped
+  Cancelled
+  Failed
+}
+
+enum PickupAppointmentStatus {
+  Scheduled
+  Confirmed
+  InProgress
+  Ready
+  Completed
+  Cancelled
+  NoShow
+}
+
+enum PickupStatus {
+  Scheduled
+  InProgress
+  Ready
+  Completed
+  Cancelled
+}
+
+enum StaffRole {
+  ADMIN
+  STAFF
+  VIEWER
+  SALESPERSON
+}
