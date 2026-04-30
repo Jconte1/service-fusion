@@ -11,10 +11,27 @@ export type PersistDbReadyResult = {
     processedCount: number;
     readyCount: number;
     failedCount: number;
+    skippedCount: number;
     sentSuccessCount: number;
     sentFailedCount: number;
   };
 };
+
+const SKIP_REASON_SHOWROOM = "Skipped showroom/internal customer.";
+
+const SKIPPED_CUSTOMER_NAMES = new Set(
+  [
+    "SL Showroom",
+    "MLD HQ",
+    "Jackson Hole Showroom",
+    "Jackson Showroom",
+    "Mountain Land Design  (799 sub‑accounts)",
+    "Ketchum Showroom",
+    "Provo Showroom",
+    "SLC Showroom 2345 South Main LLC",
+    "Salt Lake Showroom",
+  ].map(normalizeCustomerName),
+);
 
 function toDecimalValue(value: number): Prisma.Decimal | number {
   return Number.isFinite(value) ? value : 0;
@@ -48,7 +65,27 @@ function toUpsertKeyDate(value: string | null | undefined): Date {
   return new Date("1970-01-01T00:00:00.000Z");
 }
 
+function normalizeCustomerName(value: string | null | undefined): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function shouldSkipCustomerName(customerName: string | null | undefined): boolean {
+  const normalized = normalizeCustomerName(customerName);
+  return normalized.length > 0 && SKIPPED_CUSTOMER_NAMES.has(normalized);
+}
+
 function resolveJobSyncStatus(job: DbReadyJob): { status: SfJobSyncStatus; failureReason: string | null } {
+  if (shouldSkipCustomerName(job.customerName)) {
+    return {
+      status: SfJobSyncStatus.SKIPPED,
+      failureReason: SKIP_REASON_SHOWROOM,
+    };
+  }
+
   if (!job.acumaticaCustomerId) {
     return {
       status: SfJobSyncStatus.FAILED,
@@ -173,7 +210,9 @@ async function upsertJobWithLines(runId: string, job: DbReadyJob): Promise<SfJob
   const eventMessage =
     syncDecision.status === SfJobSyncStatus.FAILED
       ? `Persisted with FAILED status: ${syncDecision.failureReason}`
-      : "Persisted and marked READY for outbound Acumatica write.";
+      : syncDecision.status === SfJobSyncStatus.SKIPPED
+        ? `Persisted with SKIPPED status: ${syncDecision.failureReason}`
+        : "Persisted and marked READY for outbound Acumatica write.";
 
   await prisma.sfJobEvent.create({
     data: {
@@ -207,6 +246,7 @@ export async function persistDbReadyJobs(source: DbReadyJobsResult): Promise<Per
 
   let readyCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
 
   try {
     for (const job of source.jobs) {
@@ -215,6 +255,8 @@ export async function persistDbReadyJobs(source: DbReadyJobsResult): Promise<Per
         readyCount += 1;
       } else if (status === SfJobSyncStatus.FAILED) {
         failedCount += 1;
+      } else if (status === SfJobSyncStatus.SKIPPED) {
+        skippedCount += 1;
       }
     }
 
@@ -233,7 +275,12 @@ export async function persistDbReadyJobs(source: DbReadyJobsResult): Promise<Per
         processedCount: source.jobs.length,
         sentSuccessCount: 0,
         sentFailedCount: failedCount,
-        errorSummary: failedCount > 0 ? `${failedCount} jobs marked FAILED during persistence.` : null,
+        errorSummary:
+          failedCount > 0
+            ? `${failedCount} jobs marked FAILED during persistence.`
+            : skippedCount > 0
+              ? `${skippedCount} jobs marked SKIPPED during persistence.`
+              : null,
       },
     });
   } catch (error) {
@@ -257,6 +304,7 @@ export async function persistDbReadyJobs(source: DbReadyJobsResult): Promise<Per
       processedCount: source.jobs.length,
       readyCount,
       failedCount,
+      skippedCount,
       sentSuccessCount: 0,
       sentFailedCount: failedCount,
     },
