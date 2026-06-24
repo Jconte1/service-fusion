@@ -89,6 +89,41 @@ function normalizeQueueResult(result: unknown): QueueInvoiceSendResponse {
   return { ok: status >= 200 && status < 300, status, body };
 }
 
+function normalizeQueueFailure(job: QueueJobResponse): QueueInvoiceSendResponse {
+  const resultObject =
+    job.result && typeof job.result === "object"
+      ? (job.result as Record<string, unknown>)
+      : null;
+  const status =
+    typeof resultObject?.status === "number" && Number.isFinite(resultObject.status)
+      ? resultObject.status
+      : null;
+  const acumaticaResponse =
+    resultObject && "responseBody" in resultObject ? resultObject.responseBody : null;
+  const acumaticaMessage =
+    acumaticaResponse && typeof acumaticaResponse === "object"
+      ? (acumaticaResponse as Record<string, unknown>).error
+      : null;
+  const error =
+    typeof acumaticaMessage === "string" && acumaticaMessage.trim()
+      ? acumaticaMessage
+      : job.error ?? "Queue job failed.";
+
+  return {
+    ok: false,
+    status,
+    body: {
+      error,
+      jobId: job.jobId,
+      type: job.type,
+      acumaticaResponse,
+      rawError: job.error,
+      rawAcumaticaResponseText:
+        typeof resultObject?.responseText === "string" ? resultObject.responseText : null,
+    },
+  };
+}
+
 export function shouldUseQueueForInvoiceSend(): boolean {
   return (process.env.SERVICE_FUSION_USE_QUEUE ?? "true").toLowerCase() === "true";
 }
@@ -114,15 +149,7 @@ export async function sendSalesInvoiceViaQueue(
     }
 
     if (job.status === "failed") {
-      return {
-        ok: false,
-        status: null,
-        body: {
-          error: job.error ?? "Queue job failed.",
-          jobId: job.jobId,
-          type: job.type,
-        },
-      };
+      return normalizeQueueFailure(job);
     }
 
     await sleep(pollIntervalMs);
