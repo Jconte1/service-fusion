@@ -2,6 +2,10 @@ import type { SfJob, SfJobLine, SfJobTaxDetail } from "@prisma/client";
 
 type ValueField<T> = { value: T };
 
+const PRODUCT_LINE_WAREHOUSE_ID = "SALT LAKE INSTALL";
+const PRODUCT_LINE_LOCATION_ID = "INSTALL";
+const PRODUCT_FALLBACK_INVENTORY_ID = "INSPARTS";
+
 export type AcumaticaInvoicePayload = {
   CustomerID: ValueField<string>;
   ExternalRef: ValueField<string>;
@@ -16,6 +20,8 @@ export type AcumaticaInvoicePayload = {
     UnitPrice: ValueField<number>;
     Amount: ValueField<number>;
     TaxCategory: ValueField<"TAXABLE" | "EXEMPT">;
+    WarehouseID?: ValueField<string>;
+    Location?: ValueField<string>;
   }>;
   TaxDetails: Array<{
     TaxID: ValueField<string>;
@@ -67,6 +73,11 @@ export function mapSfJobToAcumaticaInvoicePayload(job: SendableSfJob): Acumatica
       const lineDescription = typeof line.description === "string" ? line.description.trim() : "";
       if (lineDescription) {
         mappedLine.TransactionDescr = { value: lineDescription };
+      }
+
+      if (line.lineType === "PRODUCT" && line.inventoryId !== PRODUCT_FALLBACK_INVENTORY_ID) {
+        mappedLine.WarehouseID = { value: PRODUCT_LINE_WAREHOUSE_ID };
+        mappedLine.Location = { value: PRODUCT_LINE_LOCATION_ID };
       }
 
       return mappedLine;

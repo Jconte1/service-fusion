@@ -3,6 +3,7 @@ import { SfSyncRunStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { getDailyInvoicedJobsForDenverDate } from "@/lib/service-fusion/daily-invoiced-jobs";
+import { sendInvoiceRecapEmail } from "@/lib/service-fusion/invoice-recap-email";
 import { persistDbReadyJobs } from "@/lib/service-fusion/persist-db-ready";
 import { sendReadyInvoicesForRun } from "@/lib/service-fusion/send-ready-invoices";
 import { transformDailyInvoicedJobsToDbReady } from "@/lib/service-fusion/transform-for-db";
@@ -98,6 +99,9 @@ async function runNightly(request: Request) {
     const transformed = transformDailyInvoicedJobsToDbReady(extracted);
     const persisted = await persistDbReadyJobs(transformed);
     const sendResult = send ? await sendReadyInvoicesForRun(persisted.runId) : null;
+    const recapEmail = sendResult
+      ? await sendInvoiceRecapEmail(extracted.window.date, sendResult)
+      : null;
 
     return NextResponse.json(
       {
@@ -110,6 +114,7 @@ async function runNightly(request: Request) {
         transformStats: transformed.stats,
         persist: persisted,
         send: sendResult,
+        recapEmail,
       },
       { status: 200 },
     );
@@ -134,4 +139,3 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   return runNightly(request);
 }
-

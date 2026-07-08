@@ -105,6 +105,10 @@ type ParsedModelAndDescription = {
   description: string;
 };
 
+function isLikelyInventoryModel(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value);
+}
+
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -143,6 +147,9 @@ function parseModelAndDescription(raw: string): ParsedModelAndDescription {
   const model = parts.shift()?.trim() ?? "";
   const description = parts.join(" - ").trim();
   if (!model) {
+    return { model: null, description: raw };
+  }
+  if (!isLikelyInventoryModel(model)) {
     return { model: null, description: raw };
   }
 

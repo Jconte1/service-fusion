@@ -55,6 +55,12 @@ ACUMATICA_INVOICE_ENDPOINT=SalesInvoice
 SERVICE_FUSION_USE_QUEUE=true
 MLD_QUEUE_BASE_URL=https://your-mld-queue-gateway-host
 MLD_QUEUE_TOKEN=your_queue_bearer_token
+MS_GRAPH_TENANT_ID=your_tenant_id_here
+MS_GRAPH_CLIENT_ID=your_client_id_here
+MS_GRAPH_CLIENT_SECRET=your_client_secret_here
+MS_GRAPH_FROM_EMAIL=noreply@example.com
+MS_GRAPH_TO_EMAIL=accounting@example.com
+MS_GRAPH_CC_EMAIL=
 ```
 
 ### Prisma setup
@@ -198,3 +204,24 @@ What it does:
   - `SENT` on success (stores `acumaticaRef` when available)
   - `FAILED` on error (stores `failureReason`)
 - Writes `SfJobEvent` rows for success/failure with response details.
+
+### Nightly recap email
+
+The nightly cron sends one Microsoft Graph recap email after the invoice send step when
+Graph settings and at least one recipient are configured.
+
+Required Graph settings:
+
+```bash
+MS_GRAPH_TENANT_ID=your_tenant_id_here
+MS_GRAPH_CLIENT_ID=your_client_id_here
+MS_GRAPH_CLIENT_SECRET=your_client_secret_here
+MS_GRAPH_FROM_EMAIL=noreply@example.com
+MS_GRAPH_TO_EMAIL=accounting@example.com
+MS_GRAPH_CC_EMAIL=
+```
+
+`MS_GRAPH_TO_EMAIL` and `MS_GRAPH_CC_EMAIL` accept comma-separated addresses. The subject is
+`Service Fusion Install Invoices Recap for {Date}`. The email lists successful invoices by
+Service Fusion job number and Acumatica invoice number, and failed invoices by Service Fusion
+job number, line number, inventory ID, field, and Acumatica error.
