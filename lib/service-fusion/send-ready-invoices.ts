@@ -40,6 +40,7 @@ export type SendReadyInvoicesResult = {
     serviceFusionJobNumber: string | null;
     source: CandidateSource;
     reason: string;
+    requestPayload: unknown;
     acumatica: {
       status: number | null;
       message: string | null;
@@ -369,6 +370,7 @@ export async function sendReadyInvoicesForRun(runId: string): Promise<SendReadyI
           serviceFusionJobNumber: job.serviceFusionJobNumber,
           source: candidate.source,
           reason,
+          requestPayload: payload,
           acumatica: failureLog,
         });
         continue;
@@ -423,6 +425,7 @@ export async function sendReadyInvoicesForRun(runId: string): Promise<SendReadyI
         serviceFusionJobNumber: job.serviceFusionJobNumber,
         source: candidate.source,
         reason: message,
+        requestPayload: null,
         acumatica: failureLog,
       });
     }

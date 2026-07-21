@@ -111,14 +111,116 @@ function asDisplay(value: unknown, fallback = "-"): string {
   return text || fallback;
 }
 
-function extractDetails(response: unknown): Array<Record<string, unknown>> {
-  if (!response || typeof response !== "object") {
-    return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseJsonObjectFromText(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") {
+    return null;
   }
-  const details = (response as { Details?: unknown }).Details;
-  return Array.isArray(details)
-    ? details.filter((line): line is Record<string, unknown> => Boolean(line && typeof line === "object"))
-    : [];
+
+  const jsonStart = value.indexOf("{");
+  if (jsonStart < 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value.slice(jsonStart)) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function responseCandidates(response: unknown): Array<Record<string, unknown>> {
+  const candidates: Array<Record<string, unknown>> = [];
+  const queue: unknown[] = [response];
+  const seen = new Set<Record<string, unknown>>();
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (!isRecord(current) || seen.has(current)) {
+      continue;
+    }
+
+    seen.add(current);
+    candidates.push(current);
+
+    for (const key of ["acumaticaResponse", "responseBody", "body", "response", "result"]) {
+      queue.push(current[key]);
+    }
+
+    for (const key of ["rawAcumaticaResponseText", "responseText", "rawError", "error"]) {
+      const parsed = parseJsonObjectFromText(current[key]);
+      if (parsed) {
+        queue.push(parsed);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function extractDetails(response: unknown): Array<Record<string, unknown>> {
+  for (const candidate of responseCandidates(response)) {
+    const details = candidate.Details;
+    if (Array.isArray(details)) {
+      return details.filter((line): line is Record<string, unknown> => isRecord(line));
+    }
+  }
+
+  return [];
+}
+
+function collectFieldErrors(
+  node: unknown,
+  path = "$",
+  acc: Array<{ path: string; message: string }> = [],
+): Array<{ path: string; message: string }> {
+  if (!node || typeof node !== "object") {
+    return acc;
+  }
+
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i += 1) {
+      collectFieldErrors(node[i], `${path}[${i}]`, acc);
+    }
+    return acc;
+  }
+
+  const obj = node as Record<string, unknown>;
+  const error = asDisplay(obj.error, "");
+  if (error) {
+    acc.push({ path, message: error });
+  }
+  const exceptionMessage = asDisplay(obj.exceptionMessage, "");
+  if (exceptionMessage) {
+    acc.push({ path: `${path}.exceptionMessage`, message: exceptionMessage });
+  }
+
+  for (const [key, value] of Object.entries(obj)) {
+    collectFieldErrors(value, `${path}.${key}`, acc);
+  }
+
+  return acc;
+}
+
+function collectResponseFieldErrors(response: unknown): Array<{ path: string; message: string }> {
+  const seen = new Set<string>();
+  const errors: Array<{ path: string; message: string }> = [];
+
+  for (const candidate of responseCandidates(response)) {
+    for (const error of collectFieldErrors(candidate)) {
+      const key = `${error.path}\n${error.message}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        errors.push(error);
+      }
+    }
+  }
+
+  return errors;
 }
 
 function parseDetailIndex(path: string): number | null {
@@ -135,11 +237,141 @@ function parseFieldName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isGenericAcumaticaWrapperError(message: string): boolean {
+  return (
+    /Inserting\s+'?AR Transactions'? record raised at least one error/i.test(message) ||
+    /Inserting\s+'?AR Invoice\/Memo'? record raised at least one error/i.test(message) ||
+    /^Operation failed$/i.test(message) ||
+    /^Exception has been thrown by the target of an invocation\.$/i.test(message)
+  );
+}
+
+function getLocationFromNotFoundMessage(message: string): string | null {
+  const match = message.match(/Location '([^']+)' cannot be found/i);
+  return match?.[1]?.trim() || null;
+}
+
+function isLocationNotFoundError(error: { path: string; message: string }): boolean {
+  return /LocationID$/i.test(error.path) || getLocationFromNotFoundMessage(error.message) !== null;
+}
+
+function isInventoryProcessingCrash(error: { message: string }): boolean {
+  return (
+    /processing of the field InventoryID/i.test(error.message) ||
+    /ARTran_InventoryID_FieldUpdated/i.test(error.message) ||
+    /Object reference not set to an instance of an object/i.test(error.message)
+  );
+}
+
+function friendlyMessage(
+  error: { path: string; message: string },
+  detail?: Record<string, unknown> | null,
+): string {
+  const inventoryId = detail ? asDisplay(detail.InventoryID, "") : "";
+
+  if (/unassigned Location and\/or Lot\/Serial Number/i.test(error.message)) {
+    const itemLabel = inventoryId ? ` ${inventoryId}` : "";
+    return `Inventory setup issue: Acumatica needs a valid bin/location or lot/serial setup for item${itemLabel} before this invoice can be created.`;
+  }
+
+  const missingLocation = getLocationFromNotFoundMessage(error.message);
+  if (missingLocation) {
+    return `Customer/location mapping issue: Acumatica does not have location ${missingLocation}. Fix the customer location or Service Fusion location mapping, then retry.`;
+  }
+
+  if (isInventoryProcessingCrash(error)) {
+    return "Item setup issue: Acumatica crashed while processing Inventory ID. Check the listed stock item(s) for posting/account/default setup in Acumatica, then retry.";
+  }
+
+  return compactWhitespace(error.message);
+}
+
+function requestInventoryLines(details: Array<Record<string, unknown>>): Array<{
+  lineNumber: string;
+  inventoryId: string;
+  description: string;
+}> {
+  const allLines = details.map((detail, index) => ({
+    lineNumber: asDisplay(detail.LineNbr, String(index + 1)),
+    inventoryId: asDisplay(detail.InventoryID),
+    description: asDisplay(detail.TransactionDescr, ""),
+  }));
+
+  const productLines = allLines.filter((line) => line.inventoryId !== "-" && !line.inventoryId.startsWith("INS-"));
+  return productLines.length > 0 ? productLines : allLines.filter((line) => line.inventoryId !== "-");
+}
+
+function joinLimited(values: string[], limit = 4): string {
+  const unique = Array.from(new Set(values.filter((value) => value && value !== "-")));
+  if (unique.length <= limit) {
+    return unique.join(", ") || "-";
+  }
+  return `${unique.slice(0, limit).join(", ")} +${unique.length - limit} more`;
+}
+
 function buildFailedLineErrors(failedJob: SendReadyInvoicesResult["failedJobs"][number]): FailedLineError[] {
   const details = extractDetails(failedJob.acumatica.response);
-  const fieldErrors = failedJob.acumatica.fieldErrors ?? [];
+  const requestDetails = extractDetails(failedJob.requestPayload);
+  const providedFieldErrors = failedJob.acumatica.fieldErrors ?? [];
+  const hasProvidedLineErrors = providedFieldErrors.some((error) => parseDetailIndex(error.path) != null);
+  const fieldErrors = hasProvidedLineErrors
+    ? providedFieldErrors
+    : [...providedFieldErrors, ...collectResponseFieldErrors(failedJob.acumatica.response)];
   const lineErrors = fieldErrors.filter((error) => parseDetailIndex(error.path) != null);
-  const selectedErrors = lineErrors.length > 0 ? lineErrors : fieldErrors;
+  const meaningfulDocumentErrors = fieldErrors.filter(
+    (error) => parseDetailIndex(error.path) == null && !isGenericAcumaticaWrapperError(error.message),
+  );
+
+  if (lineErrors.length > 0) {
+    return lineErrors.map((error) => {
+      const detailIndex = parseDetailIndex(error.path);
+      const detail =
+        detailIndex == null ? null : details[detailIndex] ?? requestDetails[detailIndex] ?? null;
+      return {
+        serviceFusionJobNumber: failedJob.serviceFusionJobNumber ?? failedJob.serviceFusionJobId,
+        lineNumber: detail ? asDisplay(detail.LineNbr, String((detailIndex ?? 0) + 1)) : "-",
+        inventoryId: detail ? asDisplay(detail.InventoryID) : "-",
+        field: parseFieldName(error.path),
+        message: friendlyMessage(error, detail),
+      };
+    });
+  }
+
+  const locationError = meaningfulDocumentErrors.find(isLocationNotFoundError);
+  if (locationError) {
+    return [
+      {
+        serviceFusionJobNumber: failedJob.serviceFusionJobNumber ?? failedJob.serviceFusionJobId,
+        lineNumber: "-",
+        inventoryId: "-",
+        field: "LocationID",
+        message: friendlyMessage(locationError),
+      },
+    ];
+  }
+
+  const inventoryCrash = meaningfulDocumentErrors.find(isInventoryProcessingCrash);
+  if (inventoryCrash) {
+    const likelyLines = requestInventoryLines(requestDetails);
+    return [
+      {
+        serviceFusionJobNumber: failedJob.serviceFusionJobNumber ?? failedJob.serviceFusionJobId,
+        lineNumber: joinLimited(likelyLines.map((line) => line.lineNumber)),
+        inventoryId: joinLimited(likelyLines.map((line) => line.inventoryId)),
+        field: "InventoryID",
+        message: friendlyMessage(inventoryCrash),
+      },
+    ];
+  }
+
+  const selectedErrors =
+    meaningfulDocumentErrors.length > 0
+      ? meaningfulDocumentErrors
+      : fieldErrors.filter((error) => !isGenericAcumaticaWrapperError(error.message));
 
   if (selectedErrors.length === 0) {
     return [
@@ -148,20 +380,20 @@ function buildFailedLineErrors(failedJob: SendReadyInvoicesResult["failedJobs"][
         lineNumber: "-",
         inventoryId: "-",
         field: "Document",
-        message: failedJob.reason,
+        message:
+          failedJob.acumatica.message ??
+          "Acumatica rejected the invoice, but did not return a line-level reason.",
       },
     ];
   }
 
   return selectedErrors.map((error) => {
-    const detailIndex = parseDetailIndex(error.path);
-    const detail = detailIndex == null ? null : details[detailIndex] ?? null;
     return {
       serviceFusionJobNumber: failedJob.serviceFusionJobNumber ?? failedJob.serviceFusionJobId,
-      lineNumber: detail ? asDisplay(detail.LineNbr, String((detailIndex ?? 0) + 1)) : "-",
-      inventoryId: detail ? asDisplay(detail.InventoryID) : "-",
-      field: detailIndex == null ? parseFieldName(error.path).replace(/^\$/, "Document") : parseFieldName(error.path),
-      message: error.message,
+      lineNumber: "-",
+      inventoryId: "-",
+      field: parseFieldName(error.path).replace(/^\$/, "Document"),
+      message: friendlyMessage(error),
     };
   });
 }
