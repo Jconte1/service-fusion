@@ -338,19 +338,28 @@ function computeTaxDetails(lines: DbReadyJob["lines"], jobTotal: number): {
   return { taxableAmount, taxAmount, effectiveTaxRate, taxDetails };
 }
 
-function deriveLocationIdForAcumatica(locationNameRaw: string | null): string | null {
-  const source = (locationNameRaw ?? "").trim();
-  if (!source) {
-    return null;
+function deriveLocationIdForAcumatica(
+  locationNameRaw: string | null,
+  locationNickname: string | null,
+): string | null {
+  for (const candidate of [locationNickname, locationNameRaw]) {
+    const source = (candidate ?? "").trim();
+    if (!source) {
+      continue;
+    }
+
+    const dashIndex = source.indexOf(" - ");
+    if (dashIndex <= 0) {
+      continue;
+    }
+
+    const parsed = source.slice(0, dashIndex).trim();
+    if (parsed) {
+      return parsed;
+    }
   }
 
-  const dashIndex = source.indexOf(" - ");
-  if (dashIndex <= 0) {
-    return null;
-  }
-
-  const parsed = source.slice(0, dashIndex).trim();
-  return parsed || null;
+  return null;
 }
 
 function toDbJob(job: NormalizedInvoicedJob, stats: DbReadyJobsResult["stats"]): DbReadyJob {
@@ -368,8 +377,11 @@ function toDbJob(job: NormalizedInvoicedJob, stats: DbReadyJobsResult["stats"]):
     return toDbProductLine(line, stats);
     });
 
-  // Only write LocationID using the canonical parsed field.
-  const locationIdForAcumatica = deriveLocationIdForAcumatica(job.locationNameRaw);
+  // Prefer the resolved customer location nickname; raw job location text is not always canonical.
+  const locationIdForAcumatica = deriveLocationIdForAcumatica(
+    job.locationNameRaw,
+    job.locationNickname,
+  );
   const taxComputed = computeTaxDetails(lines, job.totals.total);
 
   return {
