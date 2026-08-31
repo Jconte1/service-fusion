@@ -1,0 +1,12 @@
+Γû▓ Next.js 16.1.6 (Turbopack)
+- Local:         http://127.0.0.1:3017
+- Network:       http://127.0.0.1:3017
+- Environments: .env
+
+Γ£ô Starting...
+Creating turbopack project {
+  dir: 'C:\\Users\\james\\Documents\\MLDwebsite\\service-fusion',
+  testMode: true
+}
+Γ£ô Ready in 5.2s
+ POST /api/service-fusion/jobs/daily-invoiced/nightly?send=true 200 in 85s (compile: 1453ms, render: 84s)

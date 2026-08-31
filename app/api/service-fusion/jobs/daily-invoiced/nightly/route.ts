@@ -50,6 +50,11 @@ function parseForceFlag(url: URL): boolean {
   return value === "true" || value === "1" || value === "yes";
 }
 
+function parseRetryFailedFlag(url: URL): boolean {
+  const value = (url.searchParams.get("retryFailed") ?? "false").toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
+}
+
 async function runNightly(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -59,6 +64,7 @@ async function runNightly(request: Request) {
   const date = url.searchParams.get("date") ?? getDenverDateString();
   const send = parseSendFlag(url);
   const force = parseForceFlag(url);
+  const retryFailed = parseRetryFailedFlag(url);
   const startedAt = Date.now();
 
   if (!force) {
@@ -98,7 +104,11 @@ async function runNightly(request: Request) {
     const extracted = await getDailyInvoicedJobsForDenverDate({ date });
     const transformed = transformDailyInvoicedJobsToDbReady(extracted);
     const persisted = await persistDbReadyJobs(transformed);
-    const sendResult = send ? await sendReadyInvoicesForRun(persisted.runId) : null;
+    const sendResult = send
+      ? await sendReadyInvoicesForRun(persisted.runId, {
+          includeFailedRetries: retryFailed,
+        })
+      : null;
     const recapEmail = sendResult
       ? await sendInvoiceRecapEmail(extracted.window.date, sendResult)
       : null;
@@ -114,6 +124,7 @@ async function runNightly(request: Request) {
         transformStats: transformed.stats,
         persist: persisted,
         send: sendResult,
+        retryFailed,
         recapEmail,
       },
       { status: 200 },

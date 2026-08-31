@@ -17,11 +17,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await sendReadyInvoicesForRun(runId);
+    const retryFailedValue = (url.searchParams.get("retryFailed") ?? "false").toLowerCase();
+    const result = await sendReadyInvoicesForRun(runId, {
+      includeFailedRetries:
+        retryFailedValue === "true" ||
+        retryFailedValue === "1" ||
+        retryFailedValue === "yes",
+    });
     return NextResponse.json({ ok: true, send: result }, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown send route error.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

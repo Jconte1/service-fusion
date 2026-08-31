@@ -18,6 +18,10 @@ type JobCandidate = {
   job: SendableSfJob;
 };
 
+export type SendReadyInvoicesOptions = {
+  includeFailedRetries?: boolean;
+};
+
 export type SendReadyInvoicesResult = {
   runId: string;
   stats: {
@@ -182,7 +186,10 @@ function buildAcumaticaFailureLog(status: number | null, responseBody: unknown):
   };
 }
 
-async function loadCandidates(runId: string): Promise<{
+async function loadCandidates(
+  runId: string,
+  options: SendReadyInvoicesOptions = {},
+): Promise<{
   currentRunReady: JobCandidate[];
   retryFailed: JobCandidate[];
 }> {
@@ -198,24 +205,27 @@ async function loadCandidates(runId: string): Promise<{
     orderBy: [{ serviceFusionJobId: "asc" }],
   });
 
-  const retryFailedJobs = await prisma.sfJob.findMany({
-    where: {
-      syncStatus: SfJobSyncStatus.FAILED,
-      acumaticaRef: null,
-      runId: { not: runId },
-      events: {
-        some: {
-          eventType: "ACUMATICA_SEND_FAILED",
-        },
-      },
-    },
-    include: {
-      lines: true,
-      taxDetails: true,
-    },
-    orderBy: [{ updatedAt: "asc" }],
-    take: 500,
-  });
+  const retryFailedJobs =
+    options.includeFailedRetries === true
+      ? await prisma.sfJob.findMany({
+          where: {
+            syncStatus: SfJobSyncStatus.FAILED,
+            acumaticaRef: null,
+            runId: { not: runId },
+            events: {
+              some: {
+                eventType: "ACUMATICA_SEND_FAILED",
+              },
+            },
+          },
+          include: {
+            lines: true,
+            taxDetails: true,
+          },
+          orderBy: [{ updatedAt: "asc" }],
+          take: 500,
+        })
+      : [];
 
   return {
     currentRunReady: currentRunReadyJobs.map((job) => ({
@@ -318,10 +328,13 @@ async function markDeferred(
   });
 }
 
-export async function sendReadyInvoicesForRun(runId: string): Promise<SendReadyInvoicesResult> {
+export async function sendReadyInvoicesForRun(
+  runId: string,
+  options: SendReadyInvoicesOptions = {},
+): Promise<SendReadyInvoicesResult> {
   const useQueue = shouldUseQueueForInvoiceSend();
   const client = useQueue ? null : new AcumaticaClient();
-  const candidates = await loadCandidates(runId);
+  const candidates = await loadCandidates(runId, options);
 
   const deduped = new Map<string, JobCandidate>();
   for (const candidate of [...candidates.currentRunReady, ...candidates.retryFailed]) {
