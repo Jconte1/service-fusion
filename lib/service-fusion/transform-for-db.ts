@@ -6,6 +6,7 @@ import type {
 const PRODUCT_FALLBACK_INVENTORY_ID = "INSPARTS";
 const SERVICE_FALLBACK_INVENTORY_ID = "INS-LABOR";
 const UNKNOWN_TAX_FALLBACK_ACUMATICA_TAX_ID = "SLC";
+const ACUMATICA_LOCATION_ID_MAX_LENGTH = 10;
 
 const SERVICE_FUSION_TAX_TO_ACUMATICA_TAX_ID: Record<string, string> = {
   "CEDAR CITY TAX": "CEDAR CITY",
@@ -342,24 +343,29 @@ function deriveLocationIdForAcumatica(
   locationNameRaw: string | null,
   locationNickname: string | null,
 ): string | null {
-  for (const candidate of [locationNickname, locationNameRaw]) {
+  const parsedCandidates = [locationNickname, locationNameRaw].map((candidate) => {
     const source = (candidate ?? "").trim();
     if (!source) {
-      continue;
+      return null;
     }
 
     const dashIndex = source.indexOf(" - ");
     if (dashIndex <= 0) {
-      continue;
+      return null;
     }
 
     const parsed = source.slice(0, dashIndex).trim();
-    if (parsed) {
-      return parsed;
-    }
+    return parsed || null;
+  });
+
+  const validLengthCandidate = parsedCandidates.find(
+    (candidate) => candidate && candidate.length <= ACUMATICA_LOCATION_ID_MAX_LENGTH,
+  );
+  if (validLengthCandidate) {
+    return validLengthCandidate;
   }
 
-  return null;
+  return parsedCandidates.find((candidate): candidate is string => Boolean(candidate)) ?? null;
 }
 
 function toDbJob(job: NormalizedInvoicedJob, stats: DbReadyJobsResult["stats"]): DbReadyJob {

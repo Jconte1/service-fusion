@@ -193,7 +193,6 @@ This project includes a non-production route for Step 2 (send `READY` jobs from 
 What it does:
 
 - Loads `READY` jobs for the provided `runId`.
-- Also retries prior jobs that previously failed with `ACUMATICA_SEND_FAILED` events.
 - Maps each job into Acumatica invoice payload (`Customer`, `ExtRefNbr`, `LocationID`, `Details[]`, `TaxDetails[]`).
 - Sends invoices via queue by default (`SERVICE_FUSION_USE_QUEUE=true`):
   - enqueue `POST {MLD_QUEUE_BASE_URL}/api/erp/jobs/sales-invoices`
@@ -204,6 +203,10 @@ What it does:
   - `SENT` on success (stores `acumaticaRef` when available)
   - `FAILED` on error (stores `failureReason`)
 - Writes `SfJobEvent` rows for success/failure with response details.
+
+Prior failed invoice retries are handled by the nightly route, which refetches the
+current Service Fusion job data before rebuilding the invoice payload. The send-only
+route does not resend stale failed `SfJob` payloads.
 
 ### Nightly recap email
 

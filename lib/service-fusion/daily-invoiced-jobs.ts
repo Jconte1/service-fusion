@@ -161,6 +161,7 @@ type DateParts = {
 
 export type DailyInvoicedJobsOptions = {
   date?: string;
+  additionalJobIds?: number[];
 };
 
 function sleep(ms: number): Promise<void> {
@@ -471,6 +472,13 @@ export async function getDailyInvoicedJobsForDenverDate(
     page += 1;
   } while (page <= pageCount);
 
+  const additionalJobIds = Array.from(new Set(options?.additionalJobIds ?? []));
+  for (const jobId of additionalJobIds) {
+    if (!candidates.some((candidate) => candidate.id === jobId)) {
+      candidates.push({ id: jobId, closed_at: null });
+    }
+  }
+
   const dedupe = new Set<string>();
   const jobs: NormalizedInvoicedJob[] = [];
   const failures: Array<{ jobId: number; reason: string }> = [];
@@ -490,6 +498,14 @@ export async function getDailyInvoicedJobsForDenverDate(
       const job = await fetchJsonWithRetry<ServiceFusionJobDetail>(
         `/jobs/${candidate.id}?expand=products,services`,
       );
+
+      if (normalizeCompareValue(job.status) !== "invoiced") {
+        failures.push({
+          jobId: candidate.id,
+          reason: `Job status is not Invoiced: ${job.status ?? "unknown"}.`,
+        });
+        continue;
+      }
 
       const issues: ExtractionIssue[] = [];
       const customerId = job.customer_id ?? null;

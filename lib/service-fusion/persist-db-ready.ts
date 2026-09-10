@@ -99,20 +99,71 @@ function resolveJobSyncStatus(job: DbReadyJob): { status: SfJobSyncStatus; failu
   };
 }
 
+function alreadySentSkipReason(acumaticaRef: string | null): string {
+  return acumaticaRef
+    ? `Skipped because this Service Fusion job already has Acumatica invoice ${acumaticaRef}.`
+    : "Skipped because this Service Fusion job was already sent to Acumatica.";
+}
+
 async function upsertJobWithLines(runId: string, job: DbReadyJob): Promise<SfJobSyncStatus> {
-  const syncDecision = resolveJobSyncStatus(job);
   const serviceFusionUpdatedAt = toUpsertKeyDate(job.updatedAt);
+  const serviceFusionJobId = BigInt(job.serviceFusionJobId);
+  const [existingSameVersion, alreadySent] = await Promise.all([
+    prisma.sfJob.findUnique({
+      where: {
+        serviceFusionJobId_serviceFusionUpdatedAt: {
+          serviceFusionJobId,
+          serviceFusionUpdatedAt,
+        },
+      },
+      select: {
+        id: true,
+        syncStatus: true,
+        failureReason: true,
+        acumaticaRef: true,
+      },
+    }),
+    prisma.sfJob.findFirst({
+      where: {
+        serviceFusionJobId,
+        OR: [{ syncStatus: SfJobSyncStatus.SENT }, { acumaticaRef: { not: null } }],
+      },
+      select: {
+        id: true,
+        acumaticaRef: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+  ]);
+
+  const shouldPreserveSent =
+    existingSameVersion &&
+    (existingSameVersion.syncStatus === SfJobSyncStatus.SENT || existingSameVersion.acumaticaRef);
+  const isDuplicateOfSentJob =
+    alreadySent && (!existingSameVersion || alreadySent.id !== existingSameVersion.id);
+  const duplicateAcumaticaRef = isDuplicateOfSentJob ? alreadySent.acumaticaRef : undefined;
+  const syncDecision = shouldPreserveSent
+    ? {
+        status: SfJobSyncStatus.SENT,
+        failureReason: null,
+      }
+    : isDuplicateOfSentJob
+      ? {
+          status: SfJobSyncStatus.SKIPPED,
+          failureReason: alreadySentSkipReason(alreadySent.acumaticaRef),
+        }
+      : resolveJobSyncStatus(job);
 
   const upserted = await prisma.sfJob.upsert({
     where: {
       serviceFusionJobId_serviceFusionUpdatedAt: {
-        serviceFusionJobId: BigInt(job.serviceFusionJobId),
+        serviceFusionJobId,
         serviceFusionUpdatedAt,
       },
     },
     create: {
       runId,
-      serviceFusionJobId: BigInt(job.serviceFusionJobId),
+      serviceFusionJobId,
       serviceFusionJobNumber: job.serviceFusionJobNumber,
       serviceFusionUpdatedAt,
       statusSf: job.status,
@@ -136,6 +187,7 @@ async function upsertJobWithLines(runId: string, job: DbReadyJob): Promise<SfJob
       isTaxValid: job.isTaxValid,
       syncStatus: syncDecision.status,
       failureReason: syncDecision.failureReason,
+      ...(duplicateAcumaticaRef !== undefined ? { acumaticaRef: duplicateAcumaticaRef } : {}),
       payloadJson: job,
     },
     update: {
@@ -162,6 +214,7 @@ async function upsertJobWithLines(runId: string, job: DbReadyJob): Promise<SfJob
       isTaxValid: job.isTaxValid,
       syncStatus: syncDecision.status,
       failureReason: syncDecision.failureReason,
+      ...(duplicateAcumaticaRef !== undefined ? { acumaticaRef: duplicateAcumaticaRef } : {}),
       payloadJson: job,
       updatedAt: new Date(),
     },
@@ -212,6 +265,8 @@ async function upsertJobWithLines(runId: string, job: DbReadyJob): Promise<SfJob
       ? `Persisted with FAILED status: ${syncDecision.failureReason}`
       : syncDecision.status === SfJobSyncStatus.SKIPPED
         ? `Persisted with SKIPPED status: ${syncDecision.failureReason}`
+        : syncDecision.status === SfJobSyncStatus.SENT
+          ? "Persisted with SENT status preserved; invoice was already sent to Acumatica."
         : "Persisted and marked READY for outbound Acumatica write.";
 
   await prisma.sfJobEvent.create({

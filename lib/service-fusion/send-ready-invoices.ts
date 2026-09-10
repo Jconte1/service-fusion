@@ -19,6 +19,10 @@ type JobCandidate = {
 };
 
 export type SendReadyInvoicesOptions = {
+  /**
+   * Deprecated: failed Service Fusion jobs are now retried by refetching fresh
+   * job data before persistence. Kept only so older callers do not break.
+   */
   includeFailedRetries?: boolean;
 };
 
@@ -186,10 +190,7 @@ function buildAcumaticaFailureLog(status: number | null, responseBody: unknown):
   };
 }
 
-async function loadCandidates(
-  runId: string,
-  options: SendReadyInvoicesOptions = {},
-): Promise<{
+async function loadCandidates(runId: string): Promise<{
   currentRunReady: JobCandidate[];
   retryFailed: JobCandidate[];
 }> {
@@ -205,37 +206,12 @@ async function loadCandidates(
     orderBy: [{ serviceFusionJobId: "asc" }],
   });
 
-  const retryFailedJobs =
-    options.includeFailedRetries === true
-      ? await prisma.sfJob.findMany({
-          where: {
-            syncStatus: SfJobSyncStatus.FAILED,
-            acumaticaRef: null,
-            runId: { not: runId },
-            events: {
-              some: {
-                eventType: "ACUMATICA_SEND_FAILED",
-              },
-            },
-          },
-          include: {
-            lines: true,
-            taxDetails: true,
-          },
-          orderBy: [{ updatedAt: "asc" }],
-          take: 500,
-        })
-      : [];
-
   return {
     currentRunReady: currentRunReadyJobs.map((job) => ({
       source: "CURRENT_RUN_READY" as const,
       job,
     })),
-    retryFailed: retryFailedJobs.map((job) => ({
-      source: "RETRY_FAILED_SEND" as const,
-      job,
-    })),
+    retryFailed: [],
   };
 }
 
@@ -332,9 +308,10 @@ export async function sendReadyInvoicesForRun(
   runId: string,
   options: SendReadyInvoicesOptions = {},
 ): Promise<SendReadyInvoicesResult> {
+  void options;
   const useQueue = shouldUseQueueForInvoiceSend();
   const client = useQueue ? null : new AcumaticaClient();
-  const candidates = await loadCandidates(runId, options);
+  const candidates = await loadCandidates(runId);
 
   const deduped = new Map<string, JobCandidate>();
   for (const candidate of [...candidates.currentRunReady, ...candidates.retryFailed]) {
